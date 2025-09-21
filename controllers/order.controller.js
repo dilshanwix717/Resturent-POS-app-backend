@@ -1,20 +1,29 @@
+/** 
+ * Description: Controller for Order/Checkout.
+ * Created by: S.A.N.M.Wijethunga
+ * Role: CeylonX Backend Developer(Intern)
+ * ContactEmail: sanmwijethunga.support@gmail.com
+ * Created on: 2024 August 02
+ * Last edited on: 2024 August 06
+*/
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 import FinishedGoodTransaction from "../models/finishedgood_transaction.model.js";
 import PaymentTransaction from "../models/payment_transaction.model.js";
 import { generateNewCodeNumber } from "../utils/code.generator.util.js";
 import { createLog } from "../utils/logger.util.js";
 import Inventory from "../models/inventory.stock.model.js";
 import BOM from "../models/bom.model.js";
-import Product from "../models/product.model.js";
 import Wastage from "../models/wastage.model.js";
 import { io } from "../server.js";
 import { updateDailyBalance } from "./daily.balance.controller.js"
+
 
 // Create a new order
 export const createOrder = async (req, res, next) => {
     try {
         const { companyId, shopId, userId } = req;
         const { order } = req.body;
-        console.log(order)
+
         // Generate a new transaction code
         const description = "SalesID"; // or another relevant description
         const codeGen = await generateNewCodeNumber(companyId, shopId, userId, description);
@@ -29,21 +38,20 @@ export const createOrder = async (req, res, next) => {
             invoiceID: order.invoiceID,
             transactionType: "Sales",
             transactionCode,
-            billTotal: order.billTotal,
+            billTotal: order.billTotal,//close amount
             cashAmount: order.cashAmount,
             cardAmount: order.cardAmount,
             cardDigits: order.cardDigits,
             walletIn: order.walletIn,
             walletOut: order.walletOut,
             otherPayment: order.otherPayment,
-            loyaltyPoints: order.loyaltyPoints,
+            loyaltyPoints: order.loyaltyPoints, // Not yet needed
             transactionInOut: "In",
             transactionStatus: "Completed",
             customerId: order.customerId,
             sellingTypeID: order.sellingTypeID,
             sellingTypeCharge: order.sellingTypeCharge,
             sellingTypeAmount: order.sellingTypeAmount,
-            serviceChargeAuthorizedBy: order.serviceChargeAuthorizedBy || null,
             createdBy: userId
         });
 
@@ -51,82 +59,43 @@ export const createOrder = async (req, res, next) => {
         // Log the successful creation
         createLog(companyId, shopId, userId, `Order created with transaction code: ${transactionCode}`);
 
-        // Process each order item
         for (const orderItem of order.items) {
-            // Get product details to determine how to process
-            const product = await Product.findOne({ productId: orderItem.productId });
-            if (!product) {
-                throw new Error(`Product not found for product ID: ${orderItem.productId}`);
-            }
-
-            let usedProductDetails = [];
-
-            // Check if BOM exists for the product
             const bom = await BOM.findOne({ finishedGoodId: orderItem.productId });
-
-            // If BOM exists, process raw materials
-            if (bom && bom.items && bom.items.length > 0) {
-                // Process each BOM item
-                for (const bomItem of bom.items) {
-                    const inventoryItem = await Inventory.findOne({
-                        companyId,
-                        shopId,
-                        productId: bomItem.productId
-                    });
-
-                    if (!inventoryItem) {
-                        throw new Error(`Inventory not found for raw material: ${bomItem.productId}`);
-                    }
-
-                    const usedProductDetail = {
-                        productId: bomItem.productId,
-                        quantity: bomItem.qty * orderItem.quantity,
-                        currentWAC: inventoryItem.weightedAverageCost
-                    };
-
-                    usedProductDetails.push(usedProductDetail);
-
-                    // Reduce inventory stock
-                    inventoryItem.totalQuantity -= usedProductDetail.quantity;
-
-                    if (inventoryItem.totalQuantity < 0) {
-                        throw new Error(`Insufficient inventory for raw material: ${bomItem.productId}`);
-                    }
-                    io.emit("updateInventory", inventoryItem);
-                    await inventoryItem.save();
-                }
+            if (!bom) {
+                throw new Error(`BOM not found for finished good ID: ${orderItem.productId}`);
             }
-            // If no BOM or empty BOM, process direct inventory
-            else {
-                // Find inventory for this product
+
+            const usedProductDetails = [];
+
+            for (const bomItem of bom.items) {
                 const inventoryItem = await Inventory.findOne({
                     companyId,
                     shopId,
-                    productId: orderItem.productId
+                    productId: bomItem.productId
                 });
 
                 if (!inventoryItem) {
-                    throw new Error(`Inventory not found for direct product: ${orderItem.productId}`);
+                    throw new Error(`Inventory not found for product ID: ${bomItem.productId}`);
                 }
 
-                // Add to usedProductDetails for transaction record
-                usedProductDetails.push({
-                    productId: orderItem.productId,
-                    quantity: orderItem.quantity,
+                const usedProductDetail = {
+                    productId: bomItem.productId,
+                    quantity: bomItem.qty * orderItem.quantity,
                     currentWAC: inventoryItem.weightedAverageCost
-                });
+                };
+
+                usedProductDetails.push(usedProductDetail);
 
                 // Reduce inventory stock
-                inventoryItem.totalQuantity -= orderItem.quantity;
+                inventoryItem.totalQuantity -= usedProductDetail.quantity;
 
                 if (inventoryItem.totalQuantity < 0) {
-                    throw new Error(`Insufficient inventory for direct product: ${orderItem.productId}`);
+                    throw new Error(`Insufficient inventory for product ID: ${bomItem.productId}`);
                 }
                 io.emit("updateInventory", inventoryItem);
                 await inventoryItem.save();
             }
 
-            // Create finished good transaction
             const finishedGoodTransaction = new FinishedGoodTransaction({
                 ftId: "FTID-1", // This will be auto-generated by pre-save hook
                 companyId,
@@ -140,7 +109,6 @@ export const createOrder = async (req, res, next) => {
                 sellingType: order.sellingType,
                 sellingPrice: orderItem.sellingPrice,
                 discountAmount: orderItem.discountAmount,
-                discountAuthorizedBy: orderItem.discountAuthorizedBy || null,
                 customerId: order.customerId,
                 transactionInOut: "Out",
                 finishedgoodQty: orderItem.quantity, // Quantity of finished good
@@ -170,7 +138,6 @@ export const createOrder = async (req, res, next) => {
     }
 };
 
-
 // Cancel an order (Reverse the transactions)
 export const cancelOrder = async (req, res, next) => {
     try {
@@ -191,33 +158,24 @@ export const cancelOrder = async (req, res, next) => {
             return res.status(404).json({ message: "Finished good transactions not found." });
         }
 
-        // Revert inventory stock for each transaction
+        // Revert inventory stock
         for (const transaction of finishedGoodTransactions) {
-            const productId = transaction.finishedgoodId;
+            for (const usedProductDetail of transaction.usedProductDetails) {
+                const inventoryItem = await Inventory.findOne({
+                    companyId,
+                    shopId,
+                    productId: usedProductDetail.productId
+                });
 
-            // Get product details to determine how to process
-            const product = await Product.findOne({ productId });
-            if (!product) {
-                throw new Error(`Product not found for product ID: ${productId}`);
-            }
-
-            // Process used product details to revert inventory
-            if (transaction.usedProductDetails && transaction.usedProductDetails.length > 0) {
-                for (const usedProductDetail of transaction.usedProductDetails) {
-                    const inventoryItem = await Inventory.findOne({
-                        companyId,
-                        shopId,
-                        productId: usedProductDetail.productId
-                    });
-
-                    if (!inventoryItem) {
-                        throw new Error(`Inventory not found for product ID: ${usedProductDetail.productId}`);
-                    }
-
-                    inventoryItem.totalQuantity += usedProductDetail.quantity;
-                    io.emit("updateInventory", inventoryItem);
-                    await inventoryItem.save();
+                if (!inventoryItem) {
+                    throw new Error(`Inventory not found for product ID: ${usedProductDetail.productId}`);
                 }
+
+                inventoryItem.totalQuantity += usedProductDetail.quantity;
+
+                // Ensure WAC and other fields are reverted properly
+                io.emit("updateInventory", inventoryItem);
+                await inventoryItem.save();
             }
         }
 
@@ -245,7 +203,7 @@ export const cancelOrder = async (req, res, next) => {
 };
 
 //////////////////////////////// - Product Return Item vise - /////////////////////////////////////////////
-// Return specific items in an order (Partial return)
+// Reurn specific items in an order (Partial return)
 // According to item condition, the inventory will be updated and wastage will be created
 export const orderReturn = async (req, res, next) => {
     try {
@@ -258,7 +216,6 @@ export const orderReturn = async (req, res, next) => {
         if (!paymentTransaction) {
             return res.status(404).json({ message: "Payment transaction not found." });
         }
-
         // Find all related finished good transactions
         const finishedGoodTransactions = await FinishedGoodTransaction.find({ transactionCode });
 
@@ -283,56 +240,32 @@ export const orderReturn = async (req, res, next) => {
                 return res.status(400).json({ message: `Return quantity exceeds original quantity for product ID: ${productId}` });
             }
 
-            // Get product details to determine how to process the return
-            const product = await Product.findOne({ productId });
-            if (!product) {
-                throw new Error(`Product not found for product ID: ${productId}`);
-            }
-
             // Check the condition of the product (Good, Damaged, Expired)
             if (condition === "Good") {
-                // Handle return based on product type
-                if (product.hasRawMaterials) {
-                    // Return raw materials to inventory using BOM
-                    const bom = await BOM.findOne({ finishedGoodId: productId });
+                // Increase inventory using BOM
+                const bom = await BOM.findOne({ finishedGoodId: productId });
 
-                    if (!bom) {
-                        throw new Error(`BOM not found for finished good ID: ${productId}`);
-                    }
+                if (!bom) {
+                    throw new Error(`BOM not found for finished good ID: ${productId}`);
+                }
 
-                    for (const bomItem of bom.items) {
-                        const inventoryItem = await Inventory.findOne({
-                            companyId,
-                            shopId,
-                            productId: bomItem.productId
-                        });
-
-                        if (!inventoryItem) {
-                            throw new Error(`Inventory not found for product ID: ${bomItem.productId}`);
-                        }
-
-                        inventoryItem.totalQuantity += bomItem.qty * quantity; // Adjust by the returned quantity
-                        io.emit("updateInventory", inventoryItem);
-                        await inventoryItem.save();
-                    }
-                } else if (product.requiresGRN) {
-                    // For direct inventory products, return the product to inventory
+                for (const bomItem of bom.items) {
                     const inventoryItem = await Inventory.findOne({
                         companyId,
                         shopId,
-                        productId
+                        productId: bomItem.productId
                     });
 
                     if (!inventoryItem) {
-                        throw new Error(`Inventory not found for direct product ID: ${productId}`);
+                        throw new Error(`Inventory not found for product ID: ${bomItem.productId}`);
                     }
 
-                    inventoryItem.totalQuantity += quantity;
+                    inventoryItem.totalQuantity += bomItem.qty * quantity; // Adjust by the returned quantity
                     io.emit("updateInventory", inventoryItem);
                     await inventoryItem.save();
                 }
             } else if (condition === "Damaged" || condition === "Expired") {
-                // Create a wastage entry regardless of product type
+                // Create a wastage entry
                 const wastage = new Wastage({
                     wastageId: 'wastageId-1',
                     productId,
@@ -356,12 +289,12 @@ export const orderReturn = async (req, res, next) => {
             } else {
                 transaction.transactionStatus = "Partially Returned";
             }
+
             await transaction.save();
         }
 
-        // Update the payment transaction status based on overall return status
-        const allReturned = finishedGoodTransactions.every(trans =>
-            trans.transactionStatus === 'Returned' || trans.transactionStatus === 'Partially Returned');
+        // Optionally, update the payment transaction status based on overall return status
+        const allReturned = finishedGoodTransactions.every(trans => trans.transactionStatus === 'Returned' || trans.transactionStatus === 'Partially Returned');
         paymentTransaction.transactionStatus = allReturned ? "Returned" : "Partially Returned";
         io.emit("orderReturned", paymentTransaction);
         await paymentTransaction.save();
@@ -375,297 +308,6 @@ export const orderReturn = async (req, res, next) => {
         next(error);
     }
 };
-
-// Create a new order
-// export const createOrder = async (req, res, next) => {
-//     try {
-//         const { companyId, shopId, userId } = req;
-//         const { order } = req.body;
-
-//         // Generate a new transaction code
-//         const description = "SalesID"; // or another relevant description
-//         const codeGen = await generateNewCodeNumber(companyId, shopId, userId, description);
-//         const transactionCode = codeGen.code_number;
-
-//         // Create the payment transaction
-//         const paymentTransaction = new PaymentTransaction({
-//             paymentID: "PaymentID-1", // This will be auto-generated by pre-save hook
-//             companyId,
-//             shopId,
-//             transactionDateTime: new Date(),
-//             invoiceID: order.invoiceID,
-//             transactionType: "Sales",
-//             transactionCode,
-//             billTotal: order.billTotal,//close amount
-//             cashAmount: order.cashAmount,
-//             cardAmount: order.cardAmount,
-//             cardDigits: order.cardDigits,
-//             walletIn: order.walletIn,
-//             walletOut: order.walletOut,
-//             otherPayment: order.otherPayment,
-//             loyaltyPoints: order.loyaltyPoints, // Not yet needed
-//             transactionInOut: "In",
-//             transactionStatus: "Completed",
-//             customerId: order.customerId,
-//             sellingTypeID: order.sellingTypeID,
-//             sellingTypeCharge: order.sellingTypeCharge,
-//             sellingTypeAmount: order.sellingTypeAmount,
-//             createdBy: userId
-//         });
-
-//         await paymentTransaction.save();
-//         // Log the successful creation
-//         createLog(companyId, shopId, userId, `Order created with transaction code: ${transactionCode}`);
-
-//         for (const orderItem of order.items) {
-//             const bom = await BOM.findOne({ finishedGoodId: orderItem.productId });
-//             if (!bom) {
-//                 throw new Error(`BOM not found for finished good ID: ${orderItem.productId}`);
-//             }
-
-//             const usedProductDetails = [];
-
-//             for (const bomItem of bom.items) {
-//                 const inventoryItem = await Inventory.findOne({
-//                     companyId,
-//                     shopId,
-//                     productId: bomItem.productId
-//                 });
-
-//                 if (!inventoryItem) {
-//                     throw new Error(`Inventory not found for product ID: ${bomItem.productId}`);
-//                 }
-
-//                 const usedProductDetail = {
-//                     productId: bomItem.productId,
-//                     quantity: bomItem.qty * orderItem.quantity,
-//                     currentWAC: inventoryItem.weightedAverageCost
-//                 };
-
-//                 usedProductDetails.push(usedProductDetail);
-
-//                 // Reduce inventory stock
-//                 inventoryItem.totalQuantity -= usedProductDetail.quantity;
-
-//                 if (inventoryItem.totalQuantity < 0) {
-//                     throw new Error(`Insufficient inventory for product ID: ${bomItem.productId}`);
-//                 }
-//                 io.emit("updateInventory", inventoryItem);
-//                 await inventoryItem.save();
-//             }
-
-//             const finishedGoodTransaction = new FinishedGoodTransaction({
-//                 ftId: "FTID-1", // This will be auto-generated by pre-save hook
-//                 companyId,
-//                 shopId,
-//                 finishedgoodId: orderItem.productId, // The finished good ID
-//                 usedProductDetails,
-//                 transactionDateTime: new Date(),
-//                 transactionType: "Sales",
-//                 OrderNo: order.invoiceID,
-//                 transactionCode,
-//                 sellingType: order.sellingType,
-//                 sellingPrice: orderItem.sellingPrice,
-//                 discountAmount: orderItem.discountAmount,
-//                 customerId: order.customerId,
-//                 transactionInOut: "Out",
-//                 finishedgoodQty: orderItem.quantity, // Quantity of finished good
-//                 transactionStatus: "Completed",
-//                 createdBy: userId
-//             });
-
-//             await finishedGoodTransaction.save();
-//         }
-
-//         // Call updateDailyBalance logic
-//         const dailyBalanceReq = {
-//             body: {
-//                 companyId,
-//                 shopId,
-//                 createdBy: userId,
-//                 closeAmount: order.billTotal, // Adjust this depending on how you calculate closeAmount
-//                 remarks: `Order processed with transaction code: ${transactionCode}`
-//             }
-//         };
-//         await updateDailyBalance(dailyBalanceReq, res, next);
-
-//         res.status(201).json({ message: "Order and transactions created successfully", transactionCode });
-//     } catch (error) {
-//         console.error("Error creating order:", error);
-//         next(error);
-//     }
-// };
-
-// Cancel an order (Reverse the transactions)
-// export const cancelOrder = async (req, res, next) => {
-//     try {
-//         const { companyId, shopId, userId } = req;
-//         const { transactionCode } = req.params;
-
-//         // Find the payment transaction
-//         const paymentTransaction = await PaymentTransaction.findOne({ transactionCode });
-
-//         if (!paymentTransaction) {
-//             return res.status(404).json({ message: "Payment transaction not found." });
-//         }
-
-//         // Find all related finished good transactions
-//         const finishedGoodTransactions = await FinishedGoodTransaction.find({ transactionCode });
-
-//         if (!finishedGoodTransactions.length) {
-//             return res.status(404).json({ message: "Finished good transactions not found." });
-//         }
-
-//         // Revert inventory stock
-//         for (const transaction of finishedGoodTransactions) {
-//             for (const usedProductDetail of transaction.usedProductDetails) {
-//                 const inventoryItem = await Inventory.findOne({
-//                     companyId,
-//                     shopId,
-//                     productId: usedProductDetail.productId
-//                 });
-
-//                 if (!inventoryItem) {
-//                     throw new Error(`Inventory not found for product ID: ${usedProductDetail.productId}`);
-//                 }
-
-//                 inventoryItem.totalQuantity += usedProductDetail.quantity;
-
-//                 // Ensure WAC and other fields are reverted properly
-//                 io.emit("updateInventory", inventoryItem);
-//                 await inventoryItem.save();
-//             }
-//         }
-
-//         // Update status of payment transaction
-//         paymentTransaction.transactionStatus = "Cancelled";
-//         io.emit("cancelOrder", paymentTransaction);
-//         await paymentTransaction.save();
-
-//         // Update status of finished good transactions
-//         for (const transaction of finishedGoodTransactions) {
-//             transaction.transactionStatus = "Cancelled";
-//             await transaction.save();
-//         }
-
-//         io.emit("cancelFinishedGoodTransactions", finishedGoodTransactions);
-
-//         // Log the cancellation
-//         createLog(companyId, shopId, userId, `Order cancelled with transaction code: ${transactionCode}`);
-
-//         res.status(200).json({ message: "Order and transactions cancelled successfully", transactionCode });
-//     } catch (error) {
-//         console.error("Error cancelling order:", error);
-//         next(error);
-//     }
-// };
-
-// //////////////////////////////// - Product Return Item vise - /////////////////////////////////////////////
-// // Reurn specific items in an order (Partial return)
-// // According to item condition, the inventory will be updated and wastage will be created
-// export const orderReturn = async (req, res, next) => {
-//     try {
-//         const { companyId, shopId, userId } = req;
-//         const { transactionCode, itemsToReturn } = req.body; // itemsToReturn is an array of objects containing { productId, quantity, condition }
-
-//         // Find the payment transaction
-//         const paymentTransaction = await PaymentTransaction.findOne({ transactionCode });
-
-//         if (!paymentTransaction) {
-//             return res.status(404).json({ message: "Payment transaction not found." });
-//         }
-//         // Find all related finished good transactions
-//         const finishedGoodTransactions = await FinishedGoodTransaction.find({ transactionCode });
-
-//         if (!finishedGoodTransactions.length) {
-//             return res.status(404).json({ message: "Finished good transactions not found." });
-//         }
-
-//         // Process each item specified for return
-//         for (const returnItem of itemsToReturn) {
-//             const { productId, quantity, condition } = returnItem;
-
-//             // Find the corresponding finished good transaction for the product
-//             const transaction = finishedGoodTransactions.find(trans =>
-//                 trans.finishedgoodId === productId && trans.transactionStatus === "Completed");
-
-//             if (!transaction) {
-//                 return res.status(404).json({ message: `Transaction not found for product ID: ${productId}` });
-//             }
-
-//             // Ensure the quantity to return does not exceed the original transaction quantity
-//             if (quantity > transaction.finishedgoodQty) {
-//                 return res.status(400).json({ message: `Return quantity exceeds original quantity for product ID: ${productId}` });
-//             }
-
-//             // Check the condition of the product (Good, Damaged, Expired)
-//             if (condition === "Good") {
-//                 // Increase inventory using BOM
-//                 const bom = await BOM.findOne({ finishedGoodId: productId });
-
-//                 if (!bom) {
-//                     throw new Error(`BOM not found for finished good ID: ${productId}`);
-//                 }
-
-//                 for (const bomItem of bom.items) {
-//                     const inventoryItem = await Inventory.findOne({
-//                         companyId,
-//                         shopId,
-//                         productId: bomItem.productId
-//                     });
-
-//                     if (!inventoryItem) {
-//                         throw new Error(`Inventory not found for product ID: ${bomItem.productId}`);
-//                     }
-
-//                     inventoryItem.totalQuantity += bomItem.qty * quantity; // Adjust by the returned quantity
-//                     io.emit("updateInventory", inventoryItem);
-//                     await inventoryItem.save();
-//                 }
-//             } else if (condition === "Damaged" || condition === "Expired") {
-//                 // Create a wastage entry
-//                 const wastage = new Wastage({
-//                     wastageId: 'wastageId-1',
-//                     productId,
-//                     quantity,
-//                     uomId: "Unit", // Assuming uomId is known or can be derived
-//                     reason: "Returned Order",
-//                     condition,
-//                     companyId,
-//                     shopId,
-//                     date: new Date(),
-//                     userId
-//                 });
-
-//                 await wastage.save();
-//             }
-
-//             // Adjust the finished good transaction for partial return
-//             transaction.finishedgoodQty -= quantity;
-//             if (transaction.finishedgoodQty === 0) {
-//                 transaction.transactionStatus = "Returned";
-//             } else {
-//                 transaction.transactionStatus = "Partially Returned";
-//             }
-
-//             await transaction.save();
-//         }
-
-//         // Optionally, update the payment transaction status based on overall return status
-//         const allReturned = finishedGoodTransactions.every(trans => trans.transactionStatus === 'Returned' || trans.transactionStatus === 'Partially Returned');
-//         paymentTransaction.transactionStatus = allReturned ? "Returned" : "Partially Returned";
-//         io.emit("orderReturned", paymentTransaction);
-//         await paymentTransaction.save();
-
-//         // Log the return action
-//         createLog(companyId, shopId, userId, `Order partially returned with transaction code: ${transactionCode}`);
-
-//         res.status(200).json({ message: "Specified items returned successfully", transactionCode });
-//     } catch (error) {
-//         console.error("Error returning order:", error);
-//         next(error);
-//     }
-// };
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////// - Order Data Retrivals - /////////////////////////////////////////////

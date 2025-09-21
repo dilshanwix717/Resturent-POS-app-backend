@@ -9,14 +9,11 @@ const userSchema = new Schema({
         unique: true,
     },
     // Username of the user to login to the system, unique
-
     username: {
         type: String,
         required: true,
         unique: true,
     },
-
-
     // name of the user if available
     name: {
         type: String,
@@ -83,7 +80,7 @@ const userSchema = new Schema({
     timestamps: true
 });
 
-userSchema.pre('save', async function (next) {
+userSchema.pre('save', async function(next) {
     if (this.isNew) {
         const lastUser = await mongoose.model('User').findOne().sort({ createdAt: -1 });
         const lastUserID = lastUser ? parseInt(lastUser.userId.split('-')[1]) : 0;

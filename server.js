@@ -20,7 +20,6 @@ import themeRoute from './routes/theme.route.js';
 import SellingTypeRoute from './routes/sellingtype.route.js';
 import priceRoute from './routes/price.route.js';
 import orderRoute from './routes/order.route.js';
-import inventoryReportRoutes from './routes/inventory.report.route.js';
 
 //import productRoute from './routes/product.route.js';
 import shopRoute from './routes/shop.route.js';
@@ -38,7 +37,6 @@ import customerRoute from './routes/customer.route.js'
 import inventoryRoute from './routes/inventory.route.js'
 import transactionsRoute from './routes/transactions.route.js'
 import reportRoute from './routes/report.route.js'
-import discount from './routes/discount.route.js';
 
 // Utility imports
 import { setupSocket } from './utils/socket.js';
@@ -58,12 +56,8 @@ const allowedOrigins = [
   'https://savourpos.ceylonxcorporation.com', // This is the frontend making the request  // Development Local POS frontend
   'https://savourposapi.ceylonx.com',         // Ensure this backend domain is handled as well
   'https://savourposadmin.ceylonxcorporation.com',// Host Admin frontend
-  'https://pos.imaginxmedia.com',
-  'https://posadmin.imaginxmedia.com',
-  'https://posdemoadmin.ceylonxcorporation.com',
-  'https://posdemo.ceylonxcorporation.com',
-  'https://ilukahangamapos.ceylonx.com',
-  'https://ilukahangamaadmin.ceylonx.com'
+  'https://ilukahangamapos.ceylonx.lk',
+  'https://ilukahangamaadmin.ceylonx.lk'
   /*
   process.env.FRONTEND_ADMIN || 'http://localhost:3000',
   process.env.FRONTEND_POS || 'http://localhost:5173',
@@ -167,8 +161,6 @@ app.use('/api/customers', customerRoute);
 app.use('/api/inventories', inventoryRoute);
 app.use('/api/transactions', transactionsRoute);
 app.use('/api/reports', reportRoute);
-app.use('/api/inventoryReports', inventoryReportRoutes);
-app.use('/api/discount', discount);
 //app.use('/api/daily-balances', dailyBalanceRoute);
 
 // Global error handler

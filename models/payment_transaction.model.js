@@ -118,16 +118,11 @@ const Payment_TransactionSchema = new Schema({
         type: String,
         required: true,
     },
-
     // Amount for the selling type involved in the transaction
     sellingTypeAmount: {
         type: Number,
         required: true,
         min: 0,
-    },
-    serviceChargeAuthorizedBy: {
-        type: String,
-        required: false,
     },
     // Created By (Cashier logged in user)
     createdBy: {
